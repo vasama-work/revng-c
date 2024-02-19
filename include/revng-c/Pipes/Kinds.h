@@ -65,4 +65,6 @@ inline pipeline::SingleElementKind DecompiledToC("decompiled-to-c",
                                                  fat(ranks::Function),
                                                  { &ModelHeader });
 
+inline FunctionKind MLIRFunctionKind("MLIR", ranks::Function, {}, {});
+
 } // namespace revng::kinds
