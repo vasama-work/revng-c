@@ -4,3 +4,4 @@
 
 add_subdirectory(clift-import-model)
 add_subdirectory(clift-opt)
+add_subdirectory(sandbox)
