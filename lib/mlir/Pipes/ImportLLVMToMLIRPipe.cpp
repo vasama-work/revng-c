@@ -4,6 +4,9 @@
 
 #include "llvm/Transforms/Utils/Cloning.h"
 
+#include "mlir/Dialect/DLTI/DLTI.h"
+#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
+#include "mlir/Target/LLVMIR/Dialect/All.h"
 #include "mlir/Target/LLVMIR/Import.h"
 
 #include "revng/Pipeline/RegisterPipe.h"
@@ -32,16 +35,35 @@ public:
            pipeline::LLVMContainer &IRContainer,
            revng::pipes::MLIRContainer &MLIRContainer) {
 
+    mlir::DialectRegistry Registry;
+
+    // The DLTI dialect is used to express the data layout.
+    Registry.insert<mlir::DLTIDialect>();
+    // All dialects that implement the LLVMImportDialectInterface.
+    mlir::registerAllFromLLVMIRTranslations(Registry);
+
+    auto &Context = MLIRContainer.getContext();
+    Context.appendDialectRegistry(Registry);
+    Context.loadAllAvailableDialects();
+
     // Let's do the MLIR import on a cloned Module, so we can save the old one
     // untouched.
-    llvm::ValueToValueMapTy Map;
-    auto ClonedModule = llvm::CloneModule(IRContainer.getModule(), Map);
+    auto ClonedModule = llvm::CloneModule(IRContainer.getModule());
+    revng_assert(ClonedModule);
+
+    // Erase the global ctors because translating them would fail due to missing
+    // function definitions.
+    if (llvm::GlobalVariable *const V =
+        ClonedModule->getGlobalVariable("llvm.global_ctors"))
+      V->eraseFromParent();
+    if (llvm::GlobalVariable *const V =
+        ClonedModule->getGlobalVariable("llvm.global_dtors"))
+      V->eraseFromParent();
 
     // Import LLVM Dialect.
     auto Module = translateLLVMIRToModule(
       std::move(ClonedModule),
-      &MLIRContainer.getContext());
-
+      &Context);
     revng_check(mlir::succeeded(Module->verify()));
 
     MLIRContainer.setModule(std::move(Module));

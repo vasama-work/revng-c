@@ -4,6 +4,8 @@
 // Copyright (c) rev.ng Labs Srl. See LICENSE.md for details.
 //
 
+#include "llvm/ADT/DenseMap.h"
+
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/MLIRContext.h"
 
@@ -22,19 +24,21 @@ private:
   //       The thread safety of this is not clear at the time of writing,
   //       but it was decided that thread safety of cloneFiltered was not
   //       necessary at this time.
-  mutable mlir::MLIRContext Context;
+  std::unique_ptr<mlir::MLIRContext> Context;
   mutable mlir::OwningOpRef<mlir::ModuleOp> Module;
+  llvm::DenseMap<llvm::StringRef, mlir::Operation*> Targets;
 
 public:
   MLIRContainer(llvm::StringRef Name);
 
   mlir::MLIRContext &getContext() {
-    return Context;
+    if (not Context)
+      Context = makeContext();
+
+    return *Context;
   }
 
-  void setModule(mlir::OwningOpRef<mlir::ModuleOp> &&NewModule) {
-    Module = std::move(NewModule);
-  }
+  void setModule(mlir::OwningOpRef<mlir::ModuleOp> &&NewModule);
 
   std::unique_ptr<pipeline::ContainerBase>
   cloneFiltered(const pipeline::TargetsList &Targets) const override;
@@ -54,6 +58,11 @@ public:
                          const pipeline::Target &Target) const override;
 
   static std::vector<pipeline::Kind *> possibleKinds();
+
+private:
+  void prune();
+
+  static std::unique_ptr<mlir::MLIRContext> makeContext();
 };
 
 } // namespace revng::pipes

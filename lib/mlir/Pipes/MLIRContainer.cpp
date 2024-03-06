@@ -7,6 +7,7 @@
 #include "mlir/Parser/Parser.h"
 #include "mlir/Bytecode/BytecodeReader.h"
 #include "mlir/Bytecode/BytecodeWriter.h"
+#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 
 #include "revng/Pipeline/RegisterContainerFactory.h"
 
@@ -14,24 +15,21 @@
 #include "revng-c/mlir/Dialect/Clift/IR/Clift.h"
 #include "revng-c/mlir/Pipes/MLIRContainer.h"
 
+#include <optional>
+
 using namespace revng;
 using namespace revng::pipes;
 
-namespace {
+using mlir::LLVM::LLVMFuncOp;
 
 static constexpr auto& TheKind = kinds::MLIRFunctionKind;
 
+using ContextPtr = std::unique_ptr<mlir::MLIRContext>;
 using OwningModuleRef = mlir::OwningOpRef<mlir::ModuleOp>;
 
-static mlir::MLIRContext makeContext() {
-  return mlir::MLIRContext(mlir::MLIRContext::Threading::DISABLED);
-}
-
-static OwningModuleRef createModule(mlir::MLIRContext& Context) {
-  return mlir::ModuleOp::create(mlir::UnknownLoc::get(&Context));
-}
-
 static mlir::Block &getModuleBlock(mlir::ModuleOp Module) {
+  revng_assert(Module);
+  revng_assert(Module->getNumRegions() == 1);
   return Module->getRegion(0).front();
 }
 
@@ -41,32 +39,51 @@ static decltype(auto) getModuleOperations(mlir::ModuleOp Module) {
 
 static OwningModuleRef cloneModule(mlir::MLIRContext& Context, mlir::ModuleOp Module) {
   llvm::SmallString<1024> Buffer;
+  llvm::raw_svector_ostream Out(Buffer);
+  mlir::writeBytecodeToFile(Module, Out);
 
-  OwningModuleRef NewModule = createModule(Context);
-  mlir::Block *NewModuleBlock = &getModuleBlock(NewModule.get());
+  mlir::Block OuterBlock;
+  mlir::LogicalResult R = mlir::readBytecodeFile(
+    llvm::MemoryBufferRef(Buffer, "BYTECODE1"),
+    &OuterBlock,
+    mlir::ParserConfig(&Context));
+  revng_assert(mlir::succeeded(R));
 
-  for (mlir::Operation &O : getModuleBlock(Module).getOperations()) {
-    llvm::raw_svector_ostream Out(Buffer);
-    mlir::writeBytecodeToFile(&O, Out);
+  auto &Operations = OuterBlock.getOperations();
+  revng_assert(Operations.size() == 1);
 
-    mlir::LogicalResult R = mlir::readBytecodeFile(
-      llvm::MemoryBufferRef(Buffer, "BYTECODE"),
-      NewModuleBlock,
-      mlir::ParserConfig(&Context));
-    revng_assert(R.succeeded());
+  auto NewModule = mlir::cast<mlir::ModuleOp>(Operations.front());
+  NewModule->remove();
 
-    Buffer.clear();
-  }
+  revng_assert(
+    getModuleOperations(NewModule).size() ==
+    getModuleOperations(Module).size());
 
   return NewModule;
 }
 
-static pipeline::Target getTarget(mlir::Operation &O) {
-  auto Symbol = mlir::cast<mlir::SymbolOpInterface>(O);
-  return pipeline::Target(Symbol.getNameAttr().getValue(), TheKind);
+static std::optional<llvm::StringRef> getLinkageName(mlir::Operation &O) {
+  using LocType = mlir::FusedLocWith<mlir::LLVM::DISubprogramAttr>;
+  if (const auto L = mlir::dyn_cast<LocType>(O.getLoc()))
+    return L.getMetadata().getLinkageName();
+  return std::nullopt;
 }
 
-static llvm::StringRef getSymbolName(const pipeline::Target &Target) {
+static std::optional<llvm::StringRef> getFunctionName(mlir::Operation &O) {
+  revng_assert(mlir::isa<mlir::FunctionOpInterface>(O));
+  if (const auto Name = getLinkageName(O)) {
+    static constexpr llvm::StringRef Path = "/function/";
+    revng_assert(Name->starts_with(Path));
+    return Name->substr(Path.size());
+  }
+  return std::nullopt;
+}
+
+static pipeline::Target makeTarget(const llvm::StringRef Name) {
+  return pipeline::Target(Name, TheKind);
+}
+
+static llvm::StringRef getFunctionName(const pipeline::Target &Target) {
   revng_check(&Target.getKind() == &TheKind);
   revng_check(Target.getPathComponents().size() == 1);
 
@@ -75,166 +92,207 @@ static llvm::StringRef getSymbolName(const pipeline::Target &Target) {
   return Name;
 }
 
-static mlir::Operation *findSymbol(mlir::ModuleOp Module, const pipeline::Target &Target) {
-  if (mlir::Operation *const O =
-      mlir::SymbolTable::lookupSymbolIn(Module, getSymbolName(Target))) {
-    revng_assert(mlir::isa<mlir::FunctionOpInterface>(*O));
-    return O;
-  }
-  return nullptr;
+static bool isExternal(mlir::Operation *const O) {
+  return mlir::cast<mlir::FunctionOpInterface>(O).isExternal();
 }
 
-class OperationCopier
-{
-  mlir::MLIRContext &TargetContext;
-  mlir::Block &TargetBlock;
-  llvm::SmallString<1024> Buffer;
-
-public:
-  explicit OperationCopier(mlir::MLIRContext &TargetContext, mlir::Block &TargetBlock)
-    : TargetContext(TargetContext),
-      TargetBlock(TargetBlock) {}
-
-  void copy(mlir::Operation &SourceOperation) {
-    llvm::raw_svector_ostream Out(Buffer);
-    mlir::writeBytecodeToFile(&SourceOperation, Out);
-
-    mlir::LogicalResult R = mlir::readBytecodeFile(
-      llvm::MemoryBufferRef(Buffer, "BYTECODE"),
-      &TargetBlock,
-      mlir::ParserConfig(&TargetContext));
-    revng_assert(mlir::succeeded(R));
-
-    Buffer.clear();
-  }
-};
-
-} // namespace
 
 const char MLIRContainer::ID = 0;
 
 MLIRContainer::MLIRContainer(const llvm::StringRef Name) :
-  pipeline::Container<MLIRContainer>(Name),
-  Context(makeContext()) {
-  Context.loadDialect<mlir::clift::CliftDialect>();
+  pipeline::Container<MLIRContainer>(Name) {}
+
+void MLIRContainer::setModule(mlir::OwningOpRef<mlir::ModuleOp> &&NewModule) {
+  revng_assert(NewModule);
+  revng_assert(NewModule->getContext() == Context.get());
+
+  Targets.clear();
+  for (mlir::Operation &O : getModuleOperations(*NewModule)) {
+    if (not mlir::isa<LLVMFuncOp>(O))
+      continue;
+
+    if (const auto Name = getFunctionName(O)) {
+      const auto R = Targets.try_emplace(*Name, &O);
+      revng_assert(R.second);
+    }
+  }
+
+  Module = std::move(NewModule);
+
+  prune();
 }
 
 std::unique_ptr<pipeline::ContainerBase>
-MLIRContainer::cloneFiltered(const pipeline::TargetsList &Targets) const {
-#if 1
+MLIRContainer::cloneFiltered(const pipeline::TargetsList &Filter) const {
   auto NewContainer = std::make_unique<MLIRContainer>(name());
-  OperationCopier copier(NewContainer->Context, getModuleBlock(*NewContainer->Module));
+  if (Context) {
+    NewContainer->Context = makeContext();
+    NewContainer->Context->appendDialectRegistry(Context->getDialectRegistry());
+    NewContainer->Module = cloneModule(*NewContainer->Context, *Module);
 
-  for (const pipeline::Target &T : Targets) {
-    if (mlir::Operation *const O = findSymbol(*Module, T)) {
-      copier.copy(*O);
+    for (const auto &[Name, Operation] : Targets) {
+      if (mlir::cast<LLVMFuncOp>(Operation).isExternal())
+        continue;
+
+      mlir::Operation *const NewOperation = mlir::SymbolTable::lookupSymbolIn(
+        *NewContainer->Module,
+        mlir::SymbolTable::getSymbolName(Operation).getValue());
+      revng_assert(NewOperation);
+
+      const auto R = NewContainer->Targets.try_emplace(Name, NewOperation);
+      revng_assert(R.second);
+
+      if (not Filter.contains(makeTarget(Name))) {
+        // Clear the operation blocks to make it external.
+        NewOperation->getRegion(0).getBlocks().clear();
+      }
     }
-  }
-#else
-  OwningModuleRef NewModule = createModule(Context);
-  mlir::Block &NewModuleBlock = getModuleBlock(*NewContainer->Module);
 
-  for (mlir::Operation &O : getModuleOperations(*Module)) {
-    if (mlir::isa<mlir::FunctionOpInterface>(O)) {
-      auto Symbol = cast<mlir::SymbolOpInterface>(O);
-      if (Targets.contains(pipeline::Target(Symbol.getNameAttr().getValue(), TheKind)))
-        NewModuleBlock.push_back(O.clone());
-    }
+    NewContainer->prune();
   }
-  auto NewContainer = std::make_unique<MLIRContainer>(name());
-  Container->Module = cloneModule(Container->Context, *NewModule).release();
-#endif
-
   return NewContainer;
 }
 
 void MLIRContainer::mergeBackImpl(MLIRContainer &&Container) {
-#if 1
-  OwningModuleRef NewModule = cloneModule(Context, *Container.Module);
-  mlir::Block &Block = getModuleBlock(*Module);
+  if (not Container.Context)
+    return;
 
-  for (mlir::Operation &NewOperation : getModuleOperations(*NewModule)) {
-    if (mlir::Operation *const OldOperation = mlir::SymbolTable::lookupSymbolIn(
-          Module.get(),
-          cast<mlir::SymbolOpInterface>(NewOperation).getNameAttr()))
-      OldOperation->erase();
-    NewOperation.remove();
-    Block.push_back(&NewOperation);
-  }
+  if (Context) {
+    using Iterator = decltype(Targets)::iterator;
+    llvm::SmallVector<std::pair<Iterator, mlir::Operation*>, 16> NewTargets;
 
-#else
-  OwningModuleRef SourceModule = createModule(Container.Context);
-  for (mlir::Operation &O : getModuleOperations(*Container.Module)) {
-    if (mlir::isa<mlir::FunctionOpInterface>(O)) {
-      auto Symbol = cast<mlir::SymbolOpInterface>(O);
-      if (not mlir::SymbolTable::lookupSymbolIn(Module.get(), Symbol.getNameAttr())) {
-        O.remove();
-        SourceModule->push_back(&O);
+    for (const auto &[Name, Operation] : Targets) {
+      const auto R = Container.Targets.try_emplace(Name, nullptr);
+
+      if (R.second || isExternal(R.first->second)) {
+        NewTargets.emplace_back(R.first, Operation);
+      } else {
+        Operation->erase();
+      }
+    }
+
+    if (not NewTargets.empty()) {
+      prune();
+      OwningModuleRef NewModule = cloneModule(*Container.Context, *Module);
+      for (auto const &[NewIterator, Operation] : NewTargets) {
+        mlir::Operation *const NewOperation = mlir::SymbolTable::lookupSymbolIn(
+          *NewModule,
+          mlir::SymbolTable::getSymbolName(Operation));
+        revng_assert(NewOperation);
+
+        if (NewIterator->second)
+          NewIterator->second->erase();
+
+        NewOperation->remove();
+        getModuleBlock(*Container.Module).push_back(NewOperation);
       }
     }
   }
 
-  OwningModuleRef TargetModule = cloneModule(Context, *SourceModule);
-  for (mlir::Operation &O : getModuleOperations(*TargetModule)) {
-    if (mlir::isa<mlir::FunctionOpInterface>(O)) {
-      O.remove();
-      Module->push_back(&O);
-    }
-  }
-#endif
+  Targets = std::move(Container.Targets);
+  Module = std::move(Container.Module);
+  Context = std::move(Container.Context);
 }
 
 pipeline::TargetsList MLIRContainer::enumerate() const {
-  pipeline::TargetsList::List Targets;
-  for (mlir::Operation &O : getModuleOperations(*Module)) {
-    if (mlir::isa<mlir::FunctionOpInterface>(O)) {
-      Targets.push_back(getTarget(O));
-    }
-  }
-  llvm::sort(Targets);
+  pipeline::TargetsList::List List;
 
-  return pipeline::TargetsList(std::move(Targets));
+  if (Context) {
+    List.reserve(Targets.size());
+    for (const auto &[Name, O] : Targets)
+      List.push_back(makeTarget(Name));
+    llvm::sort(List);
+  }
+
+  return pipeline::TargetsList(std::move(List));
 }
 
 bool MLIRContainer::remove(const pipeline::TargetsList &Targets) {
   bool Result = false;
   for (const pipeline::Target &T : Targets) {
-    if (mlir::Operation *const O = findSymbol(*Module, T)) {
-      O->erase();
-      Result = true;
+    if (const auto I = this->Targets.find(getFunctionName(T)); I != this->Targets.end()) {
+      mlir::Operation &O = *I->second;
+      revng_assert(O.getNumRegions() == 1);
+      auto &Blocks = O.getRegion(0).getBlocks();
+      if (not Blocks.empty()) {
+        Blocks.clear();
+        Result = true;
+      }
     }
   }
   return Result;
 }
 
 void MLIRContainer::clear() {
-  getModuleBlock(*Module).clear();
+  Targets.clear();
+  Module = {};
+  Context = {};
 }
 
 llvm::Error MLIRContainer::serialize(llvm::raw_ostream &OS) const {
-  mlir::writeBytecodeToFile(Module.get(), OS);
+  if (Context)
+    Module->print(OS, mlir::OpPrintingFlags().enableDebugInfo());
   return llvm::Error::success();
 }
 
 llvm::Error MLIRContainer::deserialize(const llvm::MemoryBuffer &Buffer) {
-  Module = mlir::parseSourceString<mlir::ModuleOp>(Buffer.getBuffer(),
-                                                   mlir::ParserConfig(&Context))
-             .release();
-  // WIP
+  revng_assert(not Context);
+
+  Context = makeContext();
+  setModule(mlir::parseSourceString<mlir::ModuleOp>(Buffer.getBuffer(),
+                                                   mlir::ParserConfig(Context.get())));
+
+  // WIP: Decide return value
   return llvm::Error::success();
 }
 
 llvm::Error MLIRContainer::extractOne(llvm::raw_ostream &OS,
                                       const pipeline::Target &Target) const {
-  if (mlir::Operation *const O = findSymbol(*Module, Target)) {
-    mlir::writeBytecodeToFile(O, OS);
-  }
+  if (const auto I = Targets.find(getFunctionName(Target)); I != Targets.end())
+    mlir::writeBytecodeToFile(I->second, OS);
   // WIP
   return llvm::Error::success();
 }
 
 std::vector<pipeline::Kind *> MLIRContainer::possibleKinds() {
   return { &TheKind };
+}
+
+void MLIRContainer::prune() {
+  llvm::DenseSet<mlir::Operation *> Symbols;
+
+  for (mlir::Operation &O : getModuleOperations(*Module)) {
+    Symbols.insert(&O);
+  }
+
+  for (const auto &[Name, Operation] : Targets) {
+    Symbols.erase(Operation);
+
+    if (isExternal(Operation))
+      continue;
+
+    if (const auto &Uses = mlir::SymbolTable::getSymbolUses(Operation)) {
+      for (const mlir::SymbolTable::SymbolUse &Use : *Uses) {
+        const auto &SymbolRef = Use.getSymbolRef();
+        revng_assert(SymbolRef.getNestedReferences().empty());
+
+        mlir::Operation *const Symbol = mlir::SymbolTable::lookupSymbolIn(
+          *Module,
+          SymbolRef.getRootReference());
+        revng_assert(Symbol);
+
+        Symbols.erase(Symbol);
+      }
+    }
+  }
+
+  for (mlir::Operation *const O : Symbols) {
+    O->erase();
+  }
+}
+
+std::unique_ptr<mlir::MLIRContext> MLIRContainer::makeContext() {
+  return std::make_unique<mlir::MLIRContext>(mlir::MLIRContext::Threading::DISABLED);
 }
 
 static pipeline::RegisterDefaultConstructibleContainer<MLIRContainer> X;
