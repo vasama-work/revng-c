@@ -7,6 +7,7 @@
 #include "llvm/ADT/DenseMap.h"
 
 #include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/FunctionInterfaces.h"
 #include "mlir/IR/MLIRContext.h"
 
 #include "revng/Pipeline/Container.h"
@@ -26,17 +27,13 @@ private:
   //       necessary at this time.
   std::unique_ptr<mlir::MLIRContext> Context;
   mlir::OwningOpRef<mlir::ModuleOp> Module;
-  llvm::DenseMap<llvm::StringRef, mlir::Operation *> Targets;
+  llvm::DenseMap<llvm::StringRef, mlir::FunctionOpInterface> Targets;
 
 public:
   MLIRContainer(llvm::StringRef Name);
 
-  mlir::MLIRContext &getContext() {
-    if (not Context)
-      Context = makeContext();
-
-    return *Context;
-  }
+  mlir::ModuleOp getModule() { return *Module; }
+  mlir::ModuleOp getOrCreateModule();
 
   void setModule(mlir::OwningOpRef<mlir::ModuleOp> &&NewModule);
 

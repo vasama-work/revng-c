@@ -105,7 +105,7 @@ struct CliftConverter {
   getTypeAttribute(const model::CABIFunctionType &ModelType) {
     DefinitionGuard Guard(*this, ModelType.ID());
     if (not Guard)
-      rc_return nullptr;
+      rc_return fprintf(stderr, "E:%d\n", __LINE__), nullptr;
 
     AttributeVector<clift::FunctionArgumentAttr> Args;
     Args.reserve(ModelType.Arguments().size());
@@ -113,17 +113,17 @@ struct CliftConverter {
     for (const model::Argument &Argument : ModelType.Arguments()) {
       const auto Type = rc_recur getQualifiedType(Argument.Type());
       if (not Type)
-        rc_return nullptr;
+        rc_return fprintf(stderr, "E:%d\n", __LINE__), nullptr;
       const llvm::StringRef Name = Argument.OriginalName();
       const auto Attribute = make<clift::FunctionArgumentAttr>(Type, Name);
       if (not Attribute)
-        rc_return nullptr;
+        rc_return fprintf(stderr, "E:%d\n", __LINE__), nullptr;
       Args.push_back(Attribute);
     }
 
     const auto ReturnType = rc_recur getQualifiedType(ModelType.ReturnType());
     if (not ReturnType)
-      rc_return nullptr;
+      rc_return fprintf(stderr, "E:%d\n", __LINE__), nullptr;
 
     rc_return make<clift::FunctionAttr>(ModelType.ID(),
                                         ModelType.OriginalName(),

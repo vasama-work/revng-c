@@ -11,6 +11,8 @@
 
 #include "revng/Model/Binary.h"
 
+#include "revng-c/mlir/Dialect/Clift/IR/Clift.h"
+
 namespace revng {
 
 mlir::clift::ValueType getUnqualifiedType(mlir::MLIRContext &Context,

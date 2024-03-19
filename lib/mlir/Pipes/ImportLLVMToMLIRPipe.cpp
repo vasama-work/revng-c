@@ -14,6 +14,10 @@
 #include "revng-c/Pipes/Kinds.h"
 #include "revng-c/mlir/Pipes/MLIRContainer.h"
 
+#include "MLIRLLVMHelpers.h"
+
+using namespace revng::mlir_llvm;
+
 namespace {
 
 class ImportLLVMToMLIRPipe {
@@ -42,13 +46,14 @@ public:
     // All dialects that implement the LLVMImportDialectInterface.
     mlir::registerAllFromLLVMIRTranslations(Registry);
 
-    auto &Context = MLIRContainer.getContext();
+    auto &Context = *MLIRContainer.getOrCreateModule().getContext();
     Context.appendDialectRegistry(Registry);
     Context.loadAllAvailableDialects();
 
     // Let's do the MLIR import on a cloned Module, so we can save the old one
     // untouched.
-    auto NewModule = llvm::CloneModule(LLVMContainer.getModule());
+    const llvm::Module &OldModule = LLVMContainer.getModule();
+    auto NewModule = llvm::CloneModule(OldModule);
     revng_assert(NewModule);
 
     const auto eraseGlobalVariable = [&](const llvm::StringRef Symbol) {
@@ -64,6 +69,19 @@ public:
     // Import LLVM Dialect.
     auto Module = translateLLVMIRToModule(std::move(NewModule), &Context);
     revng_check(mlir::succeeded(Module->verify()));
+
+    for (const llvm::Function &F : OldModule.functions()) {
+      const llvm::MDNode *const MD = F.getMetadata(FunctionMetadataMDName);
+
+      if (MD == nullptr)
+        continue;
+
+      mlir::Operation *const NewF = mlir::SymbolTable::lookupSymbolIn(*Module, F.getName());
+      revng_assert(NewF != nullptr);
+
+      const llvm::MDString *const Op = llvm::cast<llvm::MDString>(MD->getOperand(0));
+      NewF->setAttr(FunctionMetadataMDName, mlir::StringAttr::get(&Context, Op->getString()));
+    }
 
     MLIRContainer.setModule(std::move(Module));
   }

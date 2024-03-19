@@ -63,16 +63,15 @@ static OwningModuleRef cloneModule(mlir::MLIRContext &Context,
   return NewModule;
 }
 
-static std::optional<llvm::StringRef> getLinkageName(mlir::Operation &O) {
+static std::optional<llvm::StringRef> getLinkageName(mlir::Operation *const O) {
   using LocType = mlir::FusedLocWith<mlir::LLVM::DISubprogramAttr>;
-  if (const auto L = mlir::dyn_cast<LocType>(O.getLoc()))
+  if (const auto L = mlir::dyn_cast<LocType>(O->getLoc()))
     return L.getMetadata().getLinkageName();
   return std::nullopt;
 }
 
-static std::optional<llvm::StringRef> getFunctionName(mlir::Operation &O) {
-  revng_assert(mlir::isa<mlir::FunctionOpInterface>(O));
-  if (const auto Name = getLinkageName(O)) {
+static std::optional<llvm::StringRef> getFunctionName(mlir::FunctionOpInterface F) {
+  if (const auto Name = getLinkageName(F)) {
     static constexpr llvm::StringRef Path = "/function/";
     revng_assert(Name->starts_with(Path));
     return Name->substr(Path.size());
@@ -93,11 +92,10 @@ static llvm::StringRef getFunctionName(const pipeline::Target &Target) {
   return Name;
 }
 
-static void makeExternal(mlir::Operation &O) {
-  revng_assert(mlir::isa<mlir::FunctionOpInterface>(O));
-  revng_assert(O.getNumRegions() == 1);
+static void makeExternal(mlir::FunctionOpInterface F) {
+  revng_assert(F->getNumRegions() == 1);
   // A function is made external by clearing its region.
-  O.getRegion(0).getBlocks().clear();
+  F->getRegion(0).getBlocks().clear();
 }
 
 static bool isExternal(mlir::Operation &O) {
@@ -107,25 +105,20 @@ static bool isExternal(mlir::Operation &O) {
 static void pruneSymbols(mlir::ModuleOp Module) {
   llvm::DenseSet<mlir::Operation *> Symbols;
 
-  const auto isTargetFunction = [](mlir::Operation &O) {
-    return mlir::isa<mlir::FunctionOpInterface>(O) and getFunctionName(O);
-  };
-
-  for (mlir::Operation &O : getModuleOperations(Module)) {
-    if (not isTargetFunction(O))
-      Symbols.insert(&O);
-  }
-
-  for (mlir::Operation &O : getModuleOperations(Module)) {
-    if (not isTargetFunction(O)) {
-      revng_assert(isExternal(O));
-      continue;
+  Module->walk([&](mlir::SymbolOpInterface S) {
+    if (auto F = mlir::dyn_cast<mlir::FunctionOpInterface>(S.getOperation())) {
+      if (getFunctionName(F))
+        return;
     }
+    Symbols.insert(S);
+  });
 
-    if (isExternal(O))
-      continue;
+  Module->walk([&](mlir::FunctionOpInterface F) {
+    if (F.isExternal())
+      return;
+    revng_assert(getFunctionName(F));
 
-    if (const auto &Uses = mlir::SymbolTable::getSymbolUses(&O)) {
+    if (const auto &Uses = mlir::SymbolTable::getSymbolUses(F)) {
       for (const mlir::SymbolTable::SymbolUse &Use : *Uses) {
         const auto &SymbolRef = Use.getSymbolRef();
         revng_assert(SymbolRef.getNestedReferences().empty());
@@ -139,11 +132,10 @@ static void pruneSymbols(mlir::ModuleOp Module) {
         Symbols.erase(Symbol);
       }
     }
-  }
+  });
 
-  for (mlir::Operation *const O : Symbols) {
+  for (mlir::Operation *const O : Symbols)
     O->erase();
-  }
 }
 
 const char MLIRContainer::ID = 0;
@@ -152,15 +144,23 @@ MLIRContainer::MLIRContainer(const llvm::StringRef Name) :
   pipeline::Container<MLIRContainer>(Name) {
 }
 
-void MLIRContainer::setModule(mlir::OwningOpRef<mlir::ModuleOp> &&NewModule) {
-  // Clear any non-target function bodies.
-  for (mlir::Operation &O : getModuleOperations(*NewModule)) {
-    if (not mlir::isa<mlir::LLVM::LLVMFuncOp>(O))
-      continue;
-
-    if (not getFunctionName(O))
-      makeExternal(O);
+mlir::ModuleOp MLIRContainer::getOrCreateModule() {
+  if (not Context) {
+    revng_assert(not Module);
+    Context = makeContext();
+    Module = mlir::ModuleOp::create(mlir::UnknownLoc::get(Context.get()));
   }
+  return *Module;
+}
+
+void MLIRContainer::setModule(mlir::OwningOpRef<mlir::ModuleOp> &&NewModule) {
+  revng_assert(NewModule);
+
+  // Make any non-target functions external.
+  NewModule->walk([&](mlir::FunctionOpInterface F) {
+    if (not getFunctionName(F))
+      makeExternal(F);
+  });
 
   // Prune
   pruneSymbols(*NewModule);
@@ -174,21 +174,15 @@ void MLIRContainer::setModuleInternal(mlir::OwningOpRef<mlir::ModuleOp>
   revng_assert(NewModule->getContext() == Context.get());
 
   Targets.clear();
-  for (mlir::Operation &O : getModuleOperations(*NewModule)) {
-    if (not mlir::isa<mlir::LLVM::LLVMFuncOp>(O))
-      continue;
-
-    const auto Name = getFunctionName(O);
-
-    if (not Name) {
+  NewModule->walk([&](mlir::FunctionOpInterface F) {
+    if (const auto Name = getFunctionName(F)) {
+      const auto R = Targets.try_emplace(*Name, F);
+      revng_assert(R.second);
+    } else {
       // Non-target functions must be external.
-      revng_assert(isExternal(O));
-      continue;
+      revng_assert(F.isExternal());
     }
-
-    const auto R = Targets.try_emplace(*Name, &O);
-    revng_assert(R.second);
-  }
+  });
 
   Module = std::move(NewModule);
 }
@@ -198,16 +192,15 @@ MLIRContainer::cloneFiltered(const pipeline::TargetsList &Filter) const {
   auto NewContainer = std::make_unique<MLIRContainer>(name());
   if (Context) {
     mlir::IRMapping Map;
-    mlir::Operation *const RawNewModule = (*Module).getOperation()->clone(Map);
-    OwningModuleRef NewModule(mlir::cast<mlir::ModuleOp>(RawNewModule));
+    OwningModuleRef NewModule(mlir::cast<mlir::ModuleOp>((*Module)->clone(Map)));
 
     bool FilteredSome = false;
-    for (const auto &[Name, Operation] : Targets) {
-      if (isExternal(*Operation))
+    for (auto [Name, F] : Targets) {
+      if (F.isExternal())
         continue;
 
       if (not Filter.contains(makeTarget(Name))) {
-        makeExternal(*Map.lookup(Operation));
+        makeExternal(mlir::cast<mlir::FunctionOpInterface>(Map.lookup(F.getOperation())));
         FilteredSome = true;
       }
     }
@@ -293,12 +286,10 @@ bool MLIRContainer::remove(const pipeline::TargetsList &List) {
     if (I == Targets.end())
       continue;
 
-    mlir::Operation &O = *I->second;
-
-    if (isExternal(O))
+    if (I->second.isExternal())
       continue;
 
-    makeExternal(O);
+    makeExternal(I->second);
     RemovedSome = true;
   }
 
