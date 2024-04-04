@@ -410,3 +410,15 @@ uint64_t mlir::clift::UnionType::getByteSize() const {
 std::string mlir::clift::UnionType::getAlias() const {
   return getName().str();
 }
+
+/************************** ScalarTupleElementAttr ****************************/
+
+mlir::LogicalResult
+mlir::clift::ScalarTupleElementAttr::verify(const EmitErrorType EmitError,
+                                            mlir::Type Type,
+                                            const llvm::StringRef Name) {
+  if (not mlir::isa<mlir::clift::ValueType>(Type))
+    return EmitError() << "Scalar tuple element type must be a value type";
+
+  return mlir::success();
+}

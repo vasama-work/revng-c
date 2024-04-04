@@ -132,4 +132,10 @@ struct UnionTypeStorage
   using ClassTypeStorage::ClassTypeStorage;
 };
 
+struct ScalarTupleTypeStorage : ClassTypeStorage<ScalarTupleTypeStorage,
+                                                 mlir::TypeStorage,
+                                                 ScalarTupleElementAttr> {
+  using ClassTypeStorage::ClassTypeStorage;
+};
+
 } // namespace mlir::clift
