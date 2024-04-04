@@ -1,10 +1,11 @@
 revng_add_analyses_library(revngcMLIRPipes revngc MLIRContainer.cpp
-                           ImportLLVMToMLIRPipe.cpp)
+                           ImportLLVMToMLIRPipe.cpp ImportCliftTypesPipe.cpp)
 
 target_link_libraries(
   revngcMLIRPipes
   PUBLIC revng::revngPipeline
          revng::revngPipes
+         revng::revngEarlyFunctionAnalysis
          MLIRTransforms
          MLIRDialect
          MLIRIR
@@ -12,4 +13,5 @@ target_link_libraries(
          MLIRDLTIDialect
          MLIRLLVMIRToLLVMTranslation
          MLIRBytecodeReader
-         MLIRBytecodeWriter)
+         MLIRBytecodeWriter
+         MLIRCliftDialect)
