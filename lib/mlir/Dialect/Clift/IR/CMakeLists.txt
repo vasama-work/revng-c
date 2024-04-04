@@ -11,6 +11,7 @@ add_mlir_dialect_library(
   CliftInterfaces.cpp
   CliftEnums.cpp
   CliftParser.cpp
+  ImportModel.cpp
   ADDITIONAL_HEADER_DIRS
   ${MLIR_MAIN_INCLUDE_DIR}/mlir/Dialect/Clift
   DEPENDS
