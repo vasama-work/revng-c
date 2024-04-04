@@ -79,14 +79,14 @@ target_link_libraries(test_clift MLIRCliftDialect Boost::unit_test_framework
 add_test(NAME test_clift COMMAND test_clift)
 
 #
-# test_clift_types
+# test_clift_type
 #
 
-revng_add_test_executable(test_clift_types "${SRC}/CliftTypes.cpp")
-target_compile_definitions(test_clift_types PRIVATE "BOOST_TEST_DYN_LINK=1")
-target_include_directories(test_clift_types PRIVATE "${CMAKE_SOURCE_DIR}"
-                                                    "${Boost_INCLUDE_DIRS}")
+revng_add_test_executable(test_clift_type "${SRC}/CliftType.cpp")
+target_compile_definitions(test_clift_type PRIVATE "BOOST_TEST_DYN_LINK=1")
+target_include_directories(test_clift_type PRIVATE "${CMAKE_SOURCE_DIR}"
+                                                   "${Boost_INCLUDE_DIRS}")
 target_link_libraries(
-  test_clift_types MLIRCliftDialect Boost::unit_test_framework
+  test_clift_type MLIRCliftDialect Boost::unit_test_framework
   revng::revngUnitTestHelpers ${LLVM_LIBRARIES})
-add_test(NAME test_clift_types COMMAND test_clift_types)
+add_test(NAME test_clift_type COMMAND test_clift_type)

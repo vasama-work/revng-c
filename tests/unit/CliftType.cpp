@@ -7,11 +7,8 @@
 #include "revng-c/mlir/Dialect/Clift/IR/Clift.h"
 #include "revng-c/mlir/Dialect/Clift/IR/ImportModel.h"
 
-#include "ModelTypes.inc"
-
-static bool doesVerifyNames() {
-  return false;
-}
+// Don't reorder this
+#include "revng/tests/unit/ModelType.inc"
 
 template<typename CallableType>
 static auto withContext(CallableType Callable) {
