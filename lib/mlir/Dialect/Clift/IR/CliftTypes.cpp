@@ -270,8 +270,8 @@ UnionType::replaceImmediateSubElements(llvm::ArrayRef<mlir::Attribute>
                                          replAttrs,
                                        llvm::ArrayRef<mlir::Type> replTypes)
   const {
-  revng_assert("it does not make any sense to replace the elements of a "
-               "defined Union");
+  revng_abort("it does not make any sense to replace the elements of a "
+              "defined Union");
   return {};
 }
 
@@ -290,7 +290,7 @@ StructType::replaceImmediateSubElements(llvm::ArrayRef<mlir::Attribute>
                                           replAttrs,
                                         llvm::ArrayRef<mlir::Type> replTypes)
   const {
-  revng_assert("it does not make any sense to replace the elements of a "
-               "defined struct");
+  revng_abort("it does not make any sense to replace the elements of a "
+              "defined struct");
   return {};
 }
