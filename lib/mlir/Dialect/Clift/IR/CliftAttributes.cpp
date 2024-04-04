@@ -23,6 +23,8 @@
 #define GET_ATTRDEF_CLASSES
 #include "revng-c/mlir/Dialect/Clift/IR/CliftAttributes.cpp.inc"
 
+using EmitErrorType = llvm::function_ref<mlir::InFlightDiagnostic()>;
+
 static thread_local std::map<uint64_t, mlir::Attribute> CurrentlyVisitedTypes;
 
 static const mlir::Attribute *getVisitedType(const uint64_t ID) {
@@ -49,12 +51,10 @@ void mlir::clift::CliftDialect::registerAttributes() {
                 /* End of types list */>();
 }
 
-mlir::LogicalResult
-mlir::clift::FieldAttr::verify(llvm::function_ref<mlir::InFlightDiagnostic()>
-                                 EmitError,
-                               uint64_t Offset,
-                               mlir::Type ElementType,
-                               llvm::StringRef Name) {
+mlir::LogicalResult mlir::clift::FieldAttr::verify(EmitErrorType EmitError,
+                                                   uint64_t Offset,
+                                                   mlir::Type ElementType,
+                                                   llvm::StringRef Name) {
   if (auto Definition = mlir::dyn_cast<mlir::clift::DefinedType>(ElementType))
     if (mlir::isa<mlir::clift::FunctionAttr>(Definition.getElementType()))
       return EmitError() << "Underlying type of field attr cannot be a "
@@ -72,27 +72,24 @@ mlir::clift::FieldAttr::verify(llvm::function_ref<mlir::InFlightDiagnostic()>
 }
 
 using EnumFieldAttr = mlir::clift::EnumFieldAttr;
-mlir::LogicalResult
-EnumFieldAttr::verify(llvm::function_ref<mlir::InFlightDiagnostic()> EmitError,
-                      uint64_t RawValue,
-                      llvm::StringRef Name) {
+mlir::LogicalResult EnumFieldAttr::verify(EmitErrorType EmitError,
+                                          uint64_t RawValue,
+                                          llvm::StringRef Name) {
   return mlir::success();
 }
 
 using TypedefAttr = mlir::clift::TypedefAttr;
-mlir::LogicalResult
-TypedefAttr::verify(llvm::function_ref<mlir::InFlightDiagnostic()> EmitError,
-                    uint64_t Id,
-                    llvm::StringRef Name,
-                    mlir::clift::ValueType UnderlyingType) {
+mlir::LogicalResult TypedefAttr::verify(EmitErrorType EmitError,
+                                        uint64_t Id,
+                                        llvm::StringRef Name,
+                                        mlir::clift::ValueType UnderlyingType) {
   return mlir::success();
 }
 
 using ArgAttr = mlir::clift::FunctionArgumentAttr;
-mlir::LogicalResult
-ArgAttr::verify(llvm::function_ref<mlir::InFlightDiagnostic()> EmitError,
-                mlir::clift::ValueType underlying,
-                llvm::StringRef Name) {
+mlir::LogicalResult ArgAttr::verify(EmitErrorType EmitError,
+                                    mlir::clift::ValueType underlying,
+                                    llvm::StringRef Name) {
   if (underlying.getByteSize() == 0) {
     return EmitError() << "type of argument of function cannot be zero size";
   }
@@ -101,7 +98,7 @@ ArgAttr::verify(llvm::function_ref<mlir::InFlightDiagnostic()> EmitError,
 
 using mlir::clift::FunctionAttr;
 mlir::LogicalResult
-FunctionAttr::verify(llvm::function_ref<mlir::InFlightDiagnostic()> EmitError,
+FunctionAttr::verify(EmitErrorType EmitError,
                      uint64_t Id,
                      llvm::StringRef,
                      mlir::clift::ValueType ReturnType,
@@ -337,15 +334,18 @@ static bool isCompleteType(const mlir::Type Type) {
   return true;
 }
 
-mlir::LogicalResult
-mlir::clift::StructType::verify(function_ref<InFlightDiagnostic()> emitError,
-                                uint64_t id) {
+mlir::LogicalResult mlir::clift::StructType::verify(EmitErrorType EmitError,
+                                                    uint64_t ID,
+                                                    llvm::StringRef Name,
+                                                    uint64_t Size) {
+  if (Size == 0)
+    return EmitError() << "struct type cannot have a size of zero";
+
   return mlir::success();
 }
 
 mlir::LogicalResult
-mlir::clift::StructType::verify(const function_ref<InFlightDiagnostic()>
-                                  EmitError,
+mlir::clift::StructType::verify(const EmitErrorType EmitError,
                                 const uint64_t ID,
                                 llvm::StringRef,
                                 const uint64_t Size,
@@ -386,7 +386,7 @@ mlir::clift::StructType::verify(const function_ref<InFlightDiagnostic()>
 }
 
 mlir::LogicalResult
-mlir::clift::UnionType::verify(function_ref<InFlightDiagnostic()> EmitError,
+mlir::clift::UnionType::verify(EmitErrorType EmitError,
                                uint64_t ID,
                                llvm::StringRef,
                                llvm::ArrayRef<FieldAttr> Fields) {
@@ -416,11 +416,7 @@ mlir::clift::StructType mlir::clift::StructType::get(MLIRContext *ctx,
 }
 
 mlir::clift::StructType
-mlir::clift::StructType::getChecked(llvm::function_ref<InFlightDiagnostic()>
-                                      EmitError,
-                                    MLIRContext *ctx,
-                                    uint64_t ID) {
-  if (failed(verify(EmitError, ID)))
+mlir::clift::StructType::getChecked(EmitErrorType EmitError,
     return {};
   return get(ctx, ID);
 }
@@ -437,9 +433,7 @@ mlir::clift::StructType::get(MLIRContext *ctx,
 }
 
 mlir::clift::StructType
-mlir::clift::StructType::getChecked(llvm::function_ref<InFlightDiagnostic()>
-                                      EmitError,
-                                    MLIRContext *ctx,
+mlir::clift::StructType::getChecked(EmitErrorType EmitError,
                                     uint64_t ID,
                                     llvm::StringRef Name,
                                     uint64_t Size,
@@ -457,8 +451,7 @@ mlir::clift::UnionType mlir::clift::UnionType::get(MLIRContext *ctx,
 }
 
 mlir::clift::UnionType
-mlir::clift::UnionType::getChecked(llvm::function_ref<InFlightDiagnostic()>
-                                     EmitError,
+mlir::clift::UnionType::getChecked(EmitErrorType EmitError,
                                    MLIRContext *ctx,
                                    uint64_t ID) {
   if (failed(verify(EmitError, ID)))
@@ -479,9 +472,7 @@ mlir::clift::UnionType::get(MLIRContext *ctx,
 }
 
 mlir::clift::UnionType
-mlir::clift::UnionType::getChecked(llvm::function_ref<InFlightDiagnostic()>
-                                     EmitError,
-                                   MLIRContext *ctx,
+mlir::clift::UnionType::getChecked(EmitErrorType EmitError,
                                    uint64_t ID,
                                    llvm::StringRef Name,
                                    llvm::ArrayRef<FieldAttr> Fields) {
