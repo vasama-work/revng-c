@@ -5,6 +5,7 @@
 //
 
 #include <optional>
+#include <utility>
 
 #include "mlir/IR/AttributeSupport.h"
 #include "mlir/IR/Attributes.h"
@@ -14,23 +15,15 @@
 
 namespace mlir::clift {
 
-template<typename StorageT, typename ValueT>
-class ClassTypeStorage : public mlir::AttributeStorage {
+template<typename StorageT,
+         typename BaseT,
+         typename SubobjectT,
+         typename ValueT = std::monostate>
+class ClassTypeStorage : public BaseT {
   struct KeyBase {
     uint64_t ID;
     llvm::StringRef Name;
-    std::optional<llvm::SmallVector<FieldAttr, 2>> Fields;
-
-    // struct storages are never exposed to the user, they are only used
-    // internally to figure out how to create unique objects. only operator== is
-    // every used, everything else is handled by hasValue
-    friend bool operator==(const KeyBase &LHS, const KeyBase &RHS) {
-      return LHS.ID == RHS.ID;
-    }
-
-    [[nodiscard]] llvm::hash_code hashValue() const {
-      return llvm::hash_value(ID);
-    }
+    std::optional<llvm::SmallVector<SubobjectT, 2>> Subobjects;
   };
 
   // Some internal mechanism of mlir have access to the key of the storage
@@ -43,12 +36,27 @@ class ClassTypeStorage : public mlir::AttributeStorage {
     Key(const uint64_t ID, const llvm::StringRef Name, ArgsT &&...Args) :
       KeyBase{ ID, Name, std::nullopt },
       ValueT{ std::forward<ArgsT>(Args)... } {}
+
+    // struct storages are never exposed to the user, they are only used
+    // internally to figure out how to create unique objects. only operator== is
+    // every used, everything else is handled by hasValue
+    friend bool operator==(const Key &LHS, const Key &RHS) {
+      return LHS.KeyBase::ID == RHS.KeyBase::ID;
+    }
+
+    [[nodiscard]] llvm::hash_code hashValue() const {
+      return llvm::hash_value(this->KeyBase::ID);
+    }
   };
 
   Key TheKey;
 
 public:
   using KeyTy = Key;
+
+  using SubobjectTy = SubobjectT;
+
+  const Key &getAsKey() const { return TheKey; }
 
   static llvm::hash_code hashKey(const KeyTy &Key) { return Key.hashValue(); }
 
@@ -58,7 +66,7 @@ public:
   ClassTypeStorage(const uint64_t ID,
                    const llvm::StringRef Name,
                    ArgsT &&...Args) :
-    TheKey(ID, Name, ValueT{ std::forward<ArgsT>(Args)... }) {}
+    TheKey(ID, Name, std::forward<ArgsT>(Args)...) {}
 
   static StorageT *construct(mlir::StorageUniquer::StorageAllocator &Allocator,
                              const KeyTy &Key) {
@@ -75,16 +83,16 @@ public:
   template<typename... ArgsT>
   [[nodiscard]] mlir::LogicalResult
   mutate(mlir::StorageUniquer::StorageAllocator &Allocator,
-         const llvm::ArrayRef<FieldAttr> Fields) {
-    if (TheKey.Fields.has_value()) {
-      if (not std::equal(TheKey.Fields->begin(),
-                         TheKey.Fields->end(),
-                         Fields.begin(),
-                         Fields.end()))
+         const llvm::ArrayRef<SubobjectT> Subobjects) {
+    if (TheKey.Subobjects.has_value()) {
+      if (not std::equal(TheKey.Subobjects->begin(),
+                         TheKey.Subobjects->end(),
+                         Subobjects.begin(),
+                         Subobjects.end()))
         return mlir::failure();
     }
 
-    TheKey.Fields.emplace(Fields.begin(), Fields.end());
+    TheKey.Subobjects.emplace(Subobjects.begin(), Subobjects.end());
     return mlir::success();
   }
 
@@ -92,30 +100,35 @@ public:
 
   [[nodiscard]] llvm::StringRef getName() const { return TheKey.Name; }
 
-  [[nodiscard]] bool isInitialized() const { return TheKey.Fields.has_value(); }
+  [[nodiscard]] bool isInitialized() const {
+    return TheKey.Subobjects.has_value();
+  }
 
-  [[nodiscard]] llvm::ArrayRef<FieldAttr> getFields() const {
-    revng_assert(TheKey.Fields.has_value());
-    return *TheKey.Fields;
+  [[nodiscard]] llvm::ArrayRef<SubobjectT> getSubobjects() const {
+    return TheKey.Subobjects.has_value() ? *TheKey.Subobjects :
+                                           llvm::ArrayRef<SubobjectT>{};
   }
 
 protected:
   [[nodiscard]] const ValueT &getValue() const { return TheKey; }
 };
 
-struct StructTypeKey {
+struct StructTypeStorageValue {
   uint64_t Size;
-
-  StructTypeKey(const uint64_t Size) : Size(Size) {}
+  StructTypeStorageValue(const uint64_t Size) : Size(Size) {}
 };
-struct StructTypeStorage : ClassTypeStorage<StructTypeStorage, StructTypeKey> {
+
+struct StructTypeStorage : ClassTypeStorage<StructTypeStorage,
+                                            mlir::AttributeStorage,
+                                            FieldAttr,
+                                            StructTypeStorageValue> {
   using ClassTypeStorage::ClassTypeStorage;
 
   [[nodiscard]] uint64_t getSize() const { return getValue().Size; }
 };
 
-struct UnionTypeKey {};
-struct UnionTypeStorage : ClassTypeStorage<UnionTypeStorage, UnionTypeKey> {
+struct UnionTypeStorage
+  : ClassTypeStorage<UnionTypeStorage, mlir::AttributeStorage, FieldAttr> {
   using ClassTypeStorage::ClassTypeStorage;
 };
 

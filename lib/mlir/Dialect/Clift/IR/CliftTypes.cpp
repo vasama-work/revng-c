@@ -272,8 +272,8 @@ void UnionType::walkImmediateSubElements(function_ref<void(Attribute)>
   const {
   if (not getImpl()->isInitialized())
     return;
-  for (auto field : getImpl()->getFields())
-    walkAttrsFn(field);
+  for (auto Field : getFields())
+    walkAttrsFn(Field);
 }
 
 mlir::Attribute
@@ -292,8 +292,8 @@ void StructType::walkImmediateSubElements(function_ref<void(Attribute)>
   const {
   if (not getImpl()->isInitialized())
     return;
-  for (auto field : getImpl()->getFields())
-    walkAttrsFn(field);
+  for (auto Field : getFields())
+    walkAttrsFn(Field);
 }
 
 mlir::Attribute
