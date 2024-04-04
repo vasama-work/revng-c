@@ -9,7 +9,7 @@ import lit.formats
 
 config.name = "clift-opt"
 config.test_format = lit.formats.ShTest(True)
-config.suffixes = [".mlir"]
+config.suffixes = [".mlir", ".yml"]
 config.test_source_root = os.path.dirname(__file__)
 config.test_exec_root = config.my_obj_root
 config.substitutions.append(
