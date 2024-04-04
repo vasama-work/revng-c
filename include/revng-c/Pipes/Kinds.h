@@ -56,8 +56,8 @@ inline TypeKind ModelTypeDefinition("model-type-definition",
 inline pipeline::SingleElementKind
   HelpersHeader("helpers-header", Binary, ranks::Binary, {}, {});
 
-inline pipeline::SingleElementKind
-  MLIRLLVMModule("mlir-llvm-module", Binary, ranks::Binary, {}, {});
+inline FunctionKind
+  MLIRLLVMFunctionKind("mlir-llvm-module", ranks::Function, {}, {});
 
 inline pipeline::SingleElementKind DecompiledToC("decompiled-to-c",
                                                  Binary,
