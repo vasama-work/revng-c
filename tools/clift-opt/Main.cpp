@@ -13,9 +13,42 @@
 #include "revng/Support/Assert.h"
 #include "revng/Support/InitRevng.h"
 
+#include "revng-c/Tools/clift-opt/Model.h"
 #include "revng-c/mlir/Dialect/Clift/IR/Clift.h"
+#include "revng-c/mlir/Dialect/Clift/Transforms/Passes.h"
 
-using namespace llvm::cl;
+namespace cl = llvm::cl;
+
+namespace {
+
+struct ModelParser : cl::parser<TupleTree<model::Binary>> {
+  using parser::parser;
+
+  bool parse(cl::Option &O,
+             const llvm::StringRef ArgName,
+             const llvm::StringRef ArgValue,
+             TupleTree<model::Binary> &Value) {
+    auto MaybeModel = TupleTree<model::Binary>::fromFile(ArgValue);
+
+    if (not MaybeModel) {
+      return O.error("Failed to parse model: "
+                     + MaybeModel.getError().message());
+    }
+
+    Value = std::move(*MaybeModel);
+    return false;
+  }
+};
+
+} // namespace
+
+TupleTree<model::Binary> Model;
+
+static cl::opt<decltype(Model), /*ExternalStorage=*/true, ModelParser> /**/
+  ModelOption("m",
+              cl::desc("model"),
+              cl::value_desc("<model path>"),
+              cl::location(Model));
 
 static constexpr char ToolName[] = "Standalone optimizer driver\n";
 
