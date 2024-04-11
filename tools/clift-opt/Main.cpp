@@ -60,10 +60,10 @@ int main(int Argc, char *Argv[]) {
   Registry.insert<mlir::clift::CliftDialect>();
 
   mlir::LLVM::registerLLVMPasses();
+  mlir::clift::registerCliftPasses();
 
   using mlir::asMainReturnCode;
   using mlir::MlirOptMain;
-  std::string ToolName = "Standalone optimizer driver\n";
 
   return asMainReturnCode(MlirOptMain(Argc, Argv, ToolName, Registry));
 
