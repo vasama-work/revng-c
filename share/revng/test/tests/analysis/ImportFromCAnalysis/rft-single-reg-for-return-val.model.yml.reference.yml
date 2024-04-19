@@ -12,6 +12,7 @@ Types:
     Size: 8
   - ID: 3000
     Kind: RawFunctionType
+    Architecture: x86_64
     Arguments:
       - Location: rcx_x86_64
         Type:

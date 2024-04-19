@@ -893,6 +893,7 @@ bool DeclVisitor::VisitFunctionPrototype(const FunctionProtoType *FP,
     auto DefaultRawType = cast<RawFunctionType>(TheDefaultPrototype.get());
 
     auto FunctionType = cast<RawFunctionType>(NewType.get());
+    FunctionType->Architecture() = DefaultRawType->Architecture();
     FunctionType->Arguments() = DefaultRawType->Arguments();
     FunctionType->ReturnValues() = DefaultRawType->ReturnValues();
     FunctionType->PreservedRegisters() = DefaultRawType->PreservedRegisters();
