@@ -2,6 +2,8 @@
 # This file is distributed under the MIT License. See LICENSE.md for details.
 #
 
+Architecture: x86_64
+
 Functions:
   - CustomName: "new_function_name"
     Prototype: "/Types/3000-RawFunctionType"
