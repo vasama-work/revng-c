@@ -6,6 +6,7 @@
 
 #include "mlir/Bytecode/BytecodeReader.h"
 #include "mlir/Bytecode/BytecodeWriter.h"
+#include "mlir/Dialect/DLTI/DLTI.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/IR/FunctionInterfaces.h"
 #include "mlir/IR/IRMapping.h"
@@ -14,6 +15,7 @@
 
 #include "revng/Pipeline/RegisterContainerFactory.h"
 
+#include "revng-c/mlir/Dialect/Clift/IR/Clift.h"
 #include "revng-c/mlir/Pipes/MLIRContainer.h"
 
 #include "MLIRLLVMHelpers.h"
@@ -32,9 +34,21 @@ using mlir::SymbolTable;
 using ContextPtr = std::unique_ptr<MLIRContext>;
 using OwningModuleRef = mlir::OwningOpRef<ModuleOp>;
 
+static const mlir::DialectRegistry &getDialectRegistry()
+{
+  static const mlir::DialectRegistry Registry = []() -> mlir::DialectRegistry {
+    mlir::DialectRegistry Registry;
+    Registry.insert<mlir::DLTIDialect>();
+    Registry.insert<mlir::LLVM::LLVMDialect>();
+    Registry.insert<mlir::clift::CliftDialect>();
+    return Registry;
+  }();
+  return Registry;
+}
+
 static ContextPtr makeContext() {
   const auto Threading = MLIRContext::Threading::DISABLED;
-  return std::make_unique<MLIRContext>(Threading);
+  return std::make_unique<MLIRContext>(getDialectRegistry(), Threading);
 }
 
 // Cloning MLIR from one module into another requires first serialising the

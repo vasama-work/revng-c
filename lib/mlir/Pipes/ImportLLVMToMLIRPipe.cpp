@@ -38,16 +38,11 @@ public:
   void run(const pipeline::ExecutionContext &Ctx,
            pipeline::LLVMContainer &LLVMContainer,
            revng::pipes::MLIRContainer &MLIRContainer) {
-    mlir::DialectRegistry Registry;
+    auto &Context = *MLIRContainer.getContext();
 
     // The DLTI dialect is used to express the data layout.
-    Registry.insert<mlir::DLTIDialect>();
-    // All dialects that implement the LLVMImportDialectInterface.
-    mlir::registerAllFromLLVMIRTranslations(Registry);
-
-    auto &Context = *MLIRContainer.getContext();
-    Context.appendDialectRegistry(Registry);
-    Context.loadAllAvailableDialects();
+    Context.loadDialect<mlir::DLTIDialect>();
+    Context.loadDialect<mlir::LLVM::LLVMDialect>();
 
     // Let's do the MLIR import on a cloned Module, so we can save the old one
     // untouched.
