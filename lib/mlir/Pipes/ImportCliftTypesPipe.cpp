@@ -116,12 +116,8 @@ public:
       if (not ImportedTypes.insert(&ModelType).second)
         return;
 
-      if (ImportedTypes.size() == 1) {
-        mlir::DialectRegistry Registry;
-        Registry.insert<mlir::clift::CliftDialect>();
-        Context.appendDialectRegistry(Registry);
-        Context.loadAllAvailableDialects();
-      }
+      if (ImportedTypes.size() == 1)
+        Context.loadDialect<mlir::clift::CliftDialect>();
 
       const auto EmitError = [&]() -> mlir::InFlightDiagnostic {
         return Context.getDiagEngine().emit(mlir::UnknownLoc::get(&Context),
