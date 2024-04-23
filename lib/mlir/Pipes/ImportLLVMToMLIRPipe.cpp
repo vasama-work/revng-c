@@ -40,10 +40,6 @@ public:
            revng::pipes::MLIRContainer &MLIRContainer) {
     auto &Context = *MLIRContainer.getContext();
 
-    // The DLTI dialect is used to express the data layout.
-    Context.loadDialect<mlir::DLTIDialect>();
-    Context.loadDialect<mlir::LLVM::LLVMDialect>();
-
     // Let's do the MLIR import on a cloned Module, so we can save the old one
     // untouched.
     const llvm::Module &OldModule = LLVMContainer.getModule();
@@ -81,13 +77,21 @@ public:
       revng_assert(NewF != nullptr);
 
       const auto getMDString =
-        [](llvm::MDNode const *const MD) -> llvm::StringRef {
+        [](const llvm::MDNode *const MD) -> llvm::StringRef {
         return llvm::cast<llvm::MDString>(MD->getOperand(0))->getString();
+      };
+
+      const auto getMDMetaAddress =
+        [](const llvm::MDNode *const MD) -> MetaAddress {
+        const auto &MDT = llvm::cast<llvm::MDTuple>(MD)->getOperand(0);
+        auto *const VAM = llvm::cast<llvm::ValueAsMetadata>(MDT);
+        return MetaAddress::fromValue(VAM->getValue());
       };
 
       // Store the entry and metadata in named attributes on the new function.
       NewF->setAttr(FunctionEntryMDName,
-                    mlir::StringAttr::get(&Context, getMDString(Entry)));
+                    mlir::StringAttr::get(&Context,
+                                          getMDMetaAddress(Entry).toString()));
       NewF->setAttr(FunctionMetadataMDName,
                     mlir::StringAttr::get(&Context, getMDString(Metadata)));
     }

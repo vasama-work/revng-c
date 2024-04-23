@@ -12,6 +12,7 @@
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/Parser/Parser.h"
+#include "mlir/Target/LLVMIR/Dialect/All.h"
 
 #include "revng/Pipeline/RegisterContainerFactory.h"
 
@@ -34,12 +35,13 @@ using mlir::SymbolTable;
 using ContextPtr = std::unique_ptr<MLIRContext>;
 using OwningModuleRef = mlir::OwningOpRef<ModuleOp>;
 
-static const mlir::DialectRegistry &getDialectRegistry()
-{
+static const mlir::DialectRegistry &getDialectRegistry() {
   static const mlir::DialectRegistry Registry = []() -> mlir::DialectRegistry {
     mlir::DialectRegistry Registry;
+    // The DLTI dialect is used to express the data layout.
     Registry.insert<mlir::DLTIDialect>();
-    Registry.insert<mlir::LLVM::LLVMDialect>();
+    // All dialects that implement the LLVMImportDialectInterface.
+    mlir::registerAllFromLLVMIRTranslations(Registry);
     Registry.insert<mlir::clift::CliftDialect>();
     return Registry;
   }();
@@ -93,8 +95,7 @@ static OwningModuleRef cloneModuleInto(ModuleOp SourceModule,
 }
 
 static pipeline::Target makeTarget(const MetaAddress &MA) {
-  static constexpr char Path[] = "/function/";
-  return pipeline::Target(Path + MA.toString(), kinds::MLIRLLVMFunctionKind);
+  return pipeline::Target(MA.toString(), kinds::MLIRLLVMFunctionKind);
 }
 
 static void makeExternal(FunctionOpInterface F) {
@@ -111,7 +112,7 @@ static void pruneUnusedSymbols(ModuleOp Module) {
   llvm::DenseSet<Operation *> UsedSymbols;
 
   visit(Module, [&](FunctionOpInterface F) {
-    if (getFunctionName(F))
+    if (isTargetFunction(F))
       UsedSymbols.insert(F);
 
     if (F.isExternal())
@@ -236,7 +237,7 @@ pipeline::TargetsList MLIRContainer::enumerate() const {
     if (F.isExternal())
       return;
 
-    if (const auto MaybeMetaAddress = getFunctionName(F))
+    if (const auto MaybeMetaAddress = getMetaAddress(F))
       List.push_back(makeTarget(*MaybeMetaAddress));
   });
 
