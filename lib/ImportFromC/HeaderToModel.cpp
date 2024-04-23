@@ -653,6 +653,8 @@ bool DeclVisitor::VisitFunctionDecl(const clang::FunctionDecl *FD) {
   } else {
     auto TheRetClangType = FD->getReturnType();
     auto TheRawFunctionType = cast<RawFunctionType>(NewType.get());
+    TheRawFunctionType->Architecture() = Model->Architecture();
+
     auto ReturnValuesInserter = TheRawFunctionType->ReturnValues()
                                   .batch_insert();
 
@@ -893,7 +895,7 @@ bool DeclVisitor::VisitFunctionPrototype(const FunctionProtoType *FP,
     auto DefaultRawType = cast<RawFunctionType>(TheDefaultPrototype.get());
 
     auto FunctionType = cast<RawFunctionType>(NewType.get());
-    FunctionType->Architecture() = DefaultRawType->Architecture();
+    FunctionType->Architecture() = Model->Architecture();
     FunctionType->Arguments() = DefaultRawType->Arguments();
     FunctionType->ReturnValues() = DefaultRawType->ReturnValues();
     FunctionType->PreservedRegisters() = DefaultRawType->PreservedRegisters();
