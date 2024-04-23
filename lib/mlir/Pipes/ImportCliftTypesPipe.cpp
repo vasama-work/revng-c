@@ -68,13 +68,12 @@ public:
   static const model::Function *getModelFunction(const model::Binary &Binary,
                                                  LLVMFuncOp F) {
     auto const FI = mlir::cast<mlir::FunctionOpInterface>(F.getOperation());
-    auto const MaybeFunctionName = getFunctionName(FI);
 
-    if (not MaybeFunctionName)
+    auto const MaybeMetaAddress = getMetaAddress(FI);
+    if (not MaybeMetaAddress)
       return nullptr;
 
-    const auto MA = MetaAddress::fromString(*MaybeFunctionName);
-    const auto It = Binary.Functions().find(MA);
+    const auto It = Binary.Functions().find(*MaybeMetaAddress);
 
     if (It == Binary.Functions().end())
       return nullptr;
@@ -135,13 +134,13 @@ public:
 
     MLIRFunctionMetadataCache Cache;
     visit(Module, [&](mlir::FunctionOpInterface F) {
-      const auto Name = getFunctionName(F);
+      const auto MaybeMetaAddress = getMetaAddress(F);
 
-      if (not Name)
+      if (not MaybeMetaAddress)
         return;
 
       const auto &ModelFunctions = Model->Functions();
-      const auto It = ModelFunctions.find(MetaAddress::fromString(*Name));
+      const auto It = ModelFunctions.find(*MaybeMetaAddress);
       revng_assert(It != ModelFunctions.end());
       const model::Function &ModelFunction = *It;
 
