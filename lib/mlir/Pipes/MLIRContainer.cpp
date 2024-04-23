@@ -78,8 +78,9 @@ static OwningModuleRef cloneModuleInto(ModuleOp SourceModule,
   return DestinationModule;
 }
 
-static pipeline::Target makeTarget(const llvm::StringRef Name) {
-  return pipeline::Target(Name, kinds::MLIRLLVMFunctionKind);
+static pipeline::Target makeTarget(const MetaAddress &MA) {
+  static constexpr char Path[] = "/function/";
+  return pipeline::Target(Path + MA.toString(), kinds::MLIRLLVMFunctionKind);
 }
 
 static void makeExternal(FunctionOpInterface F) {
@@ -130,7 +131,7 @@ void MLIRContainer::setModule(OwningModuleRef &&NewModule) {
 
   // Make any non-target functions external.
   visit(*NewModule, [&](FunctionOpInterface F) {
-    if (not F.isExternal() and not getFunctionName(F))
+    if (not F.isExternal() and not isTargetFunction(F))
       makeExternal(F);
   });
 
@@ -160,13 +161,11 @@ MLIRContainer::cloneFiltered(const pipeline::TargetsList &Filter) const {
     if (F.isExternal())
       return;
 
-    const auto MaybeTargetName = getFunctionName(F);
-    if (not MaybeTargetName)
-      return;
-
-    if (not Filter.contains(makeTarget(*MaybeTargetName))) {
-      makeExternal(F);
-      RemovedSome = true;
+    if (const auto MaybeMetaAddress = getMetaAddress(F)) {
+      if (not Filter.contains(makeTarget(*MaybeMetaAddress))) {
+        makeExternal(F);
+        RemovedSome = true;
+      }
     }
   });
 
@@ -223,8 +222,8 @@ pipeline::TargetsList MLIRContainer::enumerate() const {
     if (F.isExternal())
       return;
 
-    if (const auto MaybeTargetName = getFunctionName(F))
-      List.push_back(makeTarget(*MaybeTargetName));
+    if (const auto MaybeMetaAddress = getFunctionName(F))
+      List.push_back(makeTarget(*MaybeMetaAddress));
   });
 
   // TargetsList requires ordering but does not itself sort the list.
@@ -242,8 +241,7 @@ bool MLIRContainer::remove(const pipeline::TargetsList &List) {
     if (F.isExternal())
       return;
 
-    const auto MaybeFunctionName = getFunctionName(F);
-    if (not MaybeFunctionName)
+    if (not isTargetFunction(F))
       return;
 
     makeExternal(F);

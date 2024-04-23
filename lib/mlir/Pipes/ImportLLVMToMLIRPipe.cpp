@@ -69,12 +69,15 @@ public:
     auto Module = translateLLVMIRToModule(std::move(NewModule), &Context);
     revng_assert(mlir::succeeded(Module->verify()));
 
-    // Loop over each LLVM IR function and convert its function metadata into a
-    // named MLIR string attribute on the matching function.
+    // Loop over each LLVM IR function and convert its function entry and
+    // metadata attributes into named MLIR string attributes on the matching
+    // functions.
     for (const llvm::Function &F : OldModule.functions()) {
-      const llvm::MDNode *const MD = F.getMetadata(FunctionMetadataMDName);
+      const llvm::MDNode *const Entry = F.getMetadata(FunctionEntryMDName);
+      const llvm::MDNode
+        *const Metadata = F.getMetadata(FunctionMetadataMDName);
 
-      if (MD == nullptr)
+      if (Entry == nullptr || Metadata == nullptr)
         continue;
 
       // Find the matching function in the new MLIR module.
@@ -82,12 +85,16 @@ public:
         *const NewF = mlir::SymbolTable::lookupSymbolIn(*Module, F.getName());
       revng_assert(NewF != nullptr);
 
-      const llvm::StringRef
-        Metadata = llvm::cast<llvm::MDString>(MD->getOperand(0))->getString();
+      const auto getMDString =
+        [](llvm::MDNode const *const MD) -> llvm::StringRef {
+        return llvm::cast<llvm::MDString>(MD->getOperand(0))->getString();
+      };
 
-      // Store the metadata in a named attribute on the new function.
+      // Store the entry and metadata in named attributes on the new function.
+      NewF->setAttr(FunctionEntryMDName,
+                    mlir::StringAttr::get(&Context, getMDString(Entry)));
       NewF->setAttr(FunctionMetadataMDName,
-                    mlir::StringAttr::get(&Context, Metadata));
+                    mlir::StringAttr::get(&Context, getMDString(Metadata)));
     }
 
     MLIRContainer.setModule(std::move(Module));

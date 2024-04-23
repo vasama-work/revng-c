@@ -20,19 +20,14 @@ inline decltype(auto) getModuleOperations(mlir::ModuleOp Module) {
   return getModuleBlock(Module).getOperations();
 }
 
-inline std::optional<llvm::StringRef> getLinkageName(mlir::Operation *const O) {
-  if (const auto L = mlir::dyn_cast<LocType>(O->getLoc()))
-    return L.getMetadata().getLinkageName();
-  return std::nullopt;
+inline bool isTargetFunction(mlir::FunctionOpInterface F) {
+  return static_cast<
+    bool>(F->getAttrOfType<mlir::StringAttr>(FunctionEntryMDName));
 }
 
-inline std::optional<llvm::StringRef>
-getFunctionName(mlir::FunctionOpInterface F) {
-  if (const auto Name = getLinkageName(F)) {
-    static constexpr llvm::StringRef Path = "/function/";
-    revng_assert(Name->starts_with(Path));
-    return Name->substr(Path.size());
-  }
+inline std::optional<MetaAddress> getMetaAddress(mlir::FunctionOpInterface F) {
+  if (auto Attr = F->getAttrOfType<mlir::StringAttr>(FunctionEntryMDName))
+    return MetaAddress::fromString(Attr.getValue());
   return std::nullopt;
 }
 
