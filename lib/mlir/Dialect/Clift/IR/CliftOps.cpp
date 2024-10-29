@@ -678,6 +678,12 @@ mlir::LogicalResult GlobalVariableOp::verify() {
 
 //===----------------------------- Statements -----------------------------===//
 
+//===---------------------------- AssignLabelOp ---------------------------===//
+
+[[nodiscard]] MakeLabelOp AssignLabelOp::getLabelOp() {
+  return getLabel().getDefiningOp<MakeLabelOp>();
+}
+
 //===------------------------------ DoWhileOp -----------------------------===//
 
 mlir::LogicalResult DoWhileOp::verify() {
@@ -707,6 +713,12 @@ mlir::LogicalResult ForOp::verify() {
   }
 
   return mlir::success();
+}
+
+//===------------------------------- GotoOp -------------------------------===//
+
+MakeLabelOp GoToOp::getLabelOp() {
+  return getLabel().getDefiningOp<MakeLabelOp>();
 }
 
 //===-------------------------------- IfOp --------------------------------===//
@@ -787,6 +799,10 @@ mlir::LogicalResult ReturnOp::verify() {
 }
 
 //===------------------------------ SwitchOp ------------------------------===//
+
+ValueType SwitchOp::getConditionType() {
+  return getExpressionType(getConditionRegion());
+}
 
 void SwitchOp::build(OpBuilder &OdsBuilder,
                      OperationState &OdsState,
@@ -1087,6 +1103,59 @@ mlir::LogicalResult PointerAccessOp::verify() {
   if (FieldT == nullptr)
     return emitOpError() << getOperationName()
                          << " struct or union member index must be valid.";
+  if (FieldT != getResult().getType())
+    return emitOpError() << getOperationName()
+                         << " result type must match the selected member type.";
+
+  return mlir::success();
+}
+
+//===------------------------------ AccessOp ------------------------------===//
+
+bool AccessOp::isLvalueExpression() {
+  return isIndirect() or clift::isLvalueExpression(getValue());
+}
+
+DefinedType AccessOp::getClassType() {
+  auto ObjectT = dealias(getValue().getType(), /*IgnoreQualifiers=*/true);
+
+  if (isIndirect()) {
+    ObjectT = mlir::cast<PointerType>(ObjectT).getPointeeType();
+    ObjectT = dealias(ObjectT, /*IgnoreQualifiers=*/true);
+  }
+
+  return mlir::cast<DefinedType>(ObjectT);
+}
+
+TypeDefinitionAttr AccessOp::getClassTypeAttr() {
+  return getClassType().getElementType();
+}
+
+FieldAttr AccessOp::getFieldAttr() {
+  auto C = mlir::cast<ClassTypeAttr>(getClassTypeAttr());
+  return C.getFields()[getMemberIndex()];
+}
+
+mlir::LogicalResult AccessOp::verify() {
+  auto ObjectT = dealias(getValue().getType());
+
+  if (auto PointerT = mlir::dyn_cast<PointerType>(ObjectT)) {
+    if (not isIndirect())
+      return emitOpError() << getOperationName()
+                           << " operand must have pointer type.";
+
+    ObjectT = dealias(PointerT.getPointeeType(), /*IgnoreQualifiers=*/true);
+  }
+
+  auto D = mlir::cast<DefinedType>(ObjectT).getElementType();
+  auto Fields = mlir::cast<ClassTypeAttr>(D).getFields();
+
+  const uint64_t Index = getMemberIndex();
+  if (Index >= Fields.size())
+    return emitOpError() << getOperationName()
+                         << " member index is out of range.";
+
+  auto FieldT = Fields[Index].getType();
   if (FieldT != getResult().getType())
     return emitOpError() << getOperationName()
                          << " result type must match the selected member type.";

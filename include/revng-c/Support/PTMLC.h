@@ -55,6 +55,9 @@ public:
     Assign,
     BinaryNot,
     UnaryMinus,
+    Comma,
+    Increment,
+    Decrement,
   };
 
   enum class Keyword {
@@ -73,6 +76,9 @@ public:
     Struct,
     Union,
     Enum,
+    Void,
+    For,
+    Goto,
   };
 
   enum class Scopes {
@@ -137,6 +143,12 @@ private:
       return "union";
     case Keyword::Enum:
       return "enum";
+    case Keyword::Void:
+      return "void";
+    case Keyword::For:
+      return "for";
+    case Keyword::Goto:
+      return "goto";
     default:
       revng_unreachable("Unknown keyword");
     }
@@ -248,6 +260,15 @@ private:
     }
     case Operator::UnaryMinus: {
       return "-";
+    }
+    case Operator::Comma: {
+      return ",";
+    }
+    case Operator::Increment: {
+      return "++";
+    }
+    case Operator::Decrement: {
+      return "--";
     }
     default: {
       revng_unreachable("Unknown operator");

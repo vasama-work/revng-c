@@ -430,7 +430,7 @@ llvm::StringRef DefinedType::name() const {
 }
 
 uint64_t DefinedType::getByteSize() const {
-  return mlir::cast<SizedType>(getElementType()).getByteSize();
+  return getElementType().getByteSize();
 }
 
 bool DefinedType::getAlias(llvm::raw_ostream &OS) const {

@@ -29,4 +29,17 @@ def Clift_ExpressionOpInterface : Clift_OpInterface<"ExpressionOpInterface"> {
   ];
 }
 
+//def Clift_OperatorOpInterface : Clift_OpInterface<"OperatorOpInterface"> {
+//  let methods = [
+//    InterfaceMethod<
+//      /*desc=*/"",
+//      /*retTy*/"int",
+//      /*methodName=*/"arity",
+//      /*args=*/(ins),
+//      /*methodBody=*/[{}],
+//      /*defaultImplementation=*/[{}]
+//    >,
+//  ];
+//};
+
 #endif

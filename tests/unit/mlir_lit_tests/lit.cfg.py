@@ -15,4 +15,7 @@ config.test_exec_root = config.my_obj_root
 config.substitutions.append(
     ("%revngcliftopt", "revng --prefix=" + config.my_obj_root + " clift-opt")
 )
+config.substitutions.append(
+    ("%revngcliftemit", "revng --prefix=" + config.my_obj_root + " clift-emit")
+)
 config.substitutions.append(("%revngpipe", "revng --prefix=" + config.my_obj_root + " pipe"))
