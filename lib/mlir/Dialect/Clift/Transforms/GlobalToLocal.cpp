@@ -27,7 +27,7 @@ namespace {
 using clift::impl::CliftGlobalToLocalBase;
 struct GlobalToLocalPass : CliftGlobalToLocalBase<GlobalToLocalPass> {
   void runOnOperation() override {
-    mlir::Operation *Module = getOperation();
+    auto Module = mlir::cast<clift::ModuleOp>(getOperation());
 
     struct GlobalUser {
       clift::FunctionOp Function;
@@ -40,24 +40,30 @@ struct GlobalToLocalPass : CliftGlobalToLocalBase<GlobalToLocalPass> {
     // Globals used only in a single function are left with a valid FunctionOp.
     llvm::DenseMap<clift::GlobalVariableOp, GlobalUser> GlobalUsers;
 
-    Module->walk([&](clift::FunctionOp F) {
-      F->walk([&](clift::UseOp Use) {
+    for (auto Function : Module.getBody().getOps<clift::FunctionOp>()) {
+      // Use walk to recursively find all UseOps nested within statements.
+      Function->walk([&](clift::UseOp Use) {
         auto Symbol =
-          mlir::SymbolTable::lookupSymbolIn(Module, Use.getSymbolNameAttr());
+          mlir::SymbolTable::lookupSymbolIn(Module.getOperation(),
+                                            Use.getSymbolNameAttr());
 
         if (auto Global = mlir::dyn_cast<clift::GlobalVariableOp>(Symbol)) {
-          auto [Iterator, Inserted] = GlobalUsers.try_emplace(Global, F);
+          auto [Iterator, Inserted] = GlobalUsers.try_emplace(Global, Function);
 
-          if (not Inserted and F != Iterator->second.Function)
+          if (not Inserted and Function != Iterator->second.Function) {
+            // This global is used in multiple functions; clear the previously
+            // inserted function to signal that this global should not be moved.
             Iterator->second.Function = {};
-          else
+          } else {
             Iterator->second.Users.push_back(Use);
+          }
         }
       });
-    });
+    }
 
     mlir::OpBuilder Builder(Module->getContext());
     for (auto &[Global, User] : GlobalUsers) {
+      // Skip any global used in multiple functions.
       if (not User.Function)
         continue;
 
