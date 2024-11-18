@@ -29,52 +29,41 @@ struct GlobalToLocalPass : CliftGlobalToLocalBase<GlobalToLocalPass> {
   void runOnOperation() override {
     auto Module = mlir::cast<clift::ModuleOp>(getOperation());
 
-    struct GlobalUser {
-      clift::FunctionOp Function;
-      llvm::SmallVector<clift::UseOp> Users;
+    auto findOnlyFunctionUser = [](const mlir::SymbolTable::UseRange &Uses) {
+      clift::FunctionOp UserFunction = {};
 
-      explicit GlobalUser(clift::FunctionOp Function)
-        : Function(Function) {}
+      for (const mlir::SymbolTable::SymbolUse &Use : Uses) {
+        auto Function = Use.getUser()->getParentOfType<clift::FunctionOp>();
+
+        if (UserFunction and UserFunction != Function)
+          return clift::FunctionOp{};
+
+        UserFunction = Function;
+      }
+
+      return UserFunction;
     };
 
-    // Globals used only in a single function are left with a valid FunctionOp.
-    llvm::DenseMap<clift::GlobalVariableOp, GlobalUser> GlobalUsers;
-
-    for (auto Function : Module.getBody().getOps<clift::FunctionOp>()) {
-      // Use walk to recursively find all UseOps nested within statements.
-      Function->walk([&](clift::UseOp Use) {
-        auto Symbol =
-          mlir::SymbolTable::lookupSymbolIn(Module.getOperation(),
-                                            Use.getSymbolNameAttr());
-
-        if (auto Global = mlir::dyn_cast<clift::GlobalVariableOp>(Symbol)) {
-          auto [Iterator, Inserted] = GlobalUsers.try_emplace(Global, Function);
-
-          if (not Inserted and Function != Iterator->second.Function) {
-            // This global is used in multiple functions; clear the previously
-            // inserted function to signal that this global should not be moved.
-            Iterator->second.Function = {};
-          } else {
-            Iterator->second.Users.push_back(Use);
-          }
-        }
-      });
-    }
-
     mlir::OpBuilder Builder(Module->getContext());
-    for (auto &[Global, User] : GlobalUsers) {
-      // Skip any global used in multiple functions.
-      if (not User.Function)
-        continue;
+    for (auto Global : Module.getBody().getOps<clift::GlobalVariableOp>()) {
+      auto Uses = mlir::SymbolTable::getSymbolUses(Global.getOperation(),
+                                                   Module.getOperation());
 
-      Builder.setInsertionPointToStart(&User.Function.getBody().front());
-      auto Local = Builder.create<clift::LocalVariableOp>(Global->getLoc(),
-                                                          Global.getType(),
-                                                          Global.getSymName());
+      // getSymbolUses returns nullopt if there are unknown operations which may
+      // contain symbol uses. This is not the case for valid Clift ModuleOps.
+      revng_assert(Uses.has_value());
 
-      for (clift::UseOp Use : User.Users) {
-        Use->replaceAllUsesWith(llvm::ArrayRef(Local.getResult()));
-        Use->erase();
+      if (clift::FunctionOp Function = findOnlyFunctionUser(*Uses)) {
+        Builder.setInsertionPointToStart(&Function.getBody().front());
+        auto Local = Builder.create<clift::LocalVariableOp>(Global->getLoc(),
+                                                            Global.getType(),
+                                                            Global.getSymName());
+
+        for (const mlir::SymbolTable::SymbolUse &Use : *Uses) {
+          mlir::Operation *User = Use.getUser();
+          User->replaceAllUsesWith(llvm::ArrayRef(Local.getResult()));
+          User->erase();
+        }
       }
     }
   }
